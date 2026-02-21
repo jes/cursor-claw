@@ -1,0 +1,7 @@
+# Do not commit bot tokens or secrets
+.env
+*.env.local
+
+# Telegram bot: secrets and session state
+telegram-bot/config
+telegram-bot/.cursor_agent_session

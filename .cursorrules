@@ -1,0 +1,14 @@
+# Cursor-Claw: workspace with Telegram–Cursor agent integration
+
+This workspace can use the Telegram bot in `telegram-bot/` to chat with the Cursor agent from Telegram.
+
+## Keep context and rules up to date
+
+- **Maintain** the file `CONTEXT.md` in this repo. It is the single source of truth for what you "remember" about the user's environment. `CONTEXT.md` also contains instructions for keeping itself updated (chat context is lost each session).
+- **Keep this file (`.cursorrules`) up to date** when you change how the workspace or automation is set up (e.g. new scripts, new conventions, Telegram bot changes). Update it in the same way you update CONTEXT.md when relevant.
+- **Update** `CONTEXT.md` whenever you learn something new that is likely to be useful later (new project, host, path, convention, preference). Add or amend; keep entries concise.
+- **Prune** `CONTEXT.md` when something becomes outdated or irrelevant. Prefer deleting over leaving stale data.
+- **Commit** changes to `CONTEXT.md` and `.cursorrules` when you make updates. Use clear commit messages.
+- **Prefer** updating in the same session where you learn the information; don't defer unless the user is mid-task.
+
+Treat `CONTEXT.md` as working memory for this user across sessions. Keep it accurate, minimal, and current.
