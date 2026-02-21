@@ -26,6 +26,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "config")
 SESSION_FILE = os.path.join(SCRIPT_DIR, ".cursor_agent_session")
+CHAT_ID_FILE = os.path.join(SCRIPT_DIR, "chat_id")
 
 
 def load_config() -> Tuple[str, int]:
@@ -112,6 +113,15 @@ def save_session(session_id: Optional[str]) -> None:
                 f.write(session_id)
         except Exception as e:
             print("Could not save session: %s" % e, file=sys.stderr)
+
+
+def save_chat_id(chat_id: int) -> None:
+    """Persist chat_id so run_reminders.py can send scheduled messages to the user."""
+    try:
+        with open(CHAT_ID_FILE, "w") as f:
+            f.write(str(chat_id))
+    except Exception as e:
+        print("Could not save chat_id: %s" % e, file=sys.stderr)
 
 
 def run_agent(prompt: str, resume_session: Optional[str]) -> Tuple[str, Optional[str]]:
@@ -206,6 +216,7 @@ def main():
             if uid != allowed_user_id:
                 continue
             chat_id = msg["chat"]["id"]
+            save_chat_id(chat_id)
             text = (msg.get("text") or "").strip()
             if not text:
                 send_message(token, chat_id, "(Send a text message to run the agent.)")

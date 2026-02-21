@@ -61,6 +61,8 @@ python3 telegram-bot/agent_bot.py
 
 Leave it running. When you send a text message to your bot on Telegram, it will run `cursor agent` in this workspace and reply with the agent’s output.
 
+**Hand off to systemd:** Once the bot is working, you can message the agent (e.g. "install the systemd unit with lingering so the bot runs at boot") and the agent can copy the unit files to `~/.config/systemd/user/`, run `loginctl enable-linger $USER`, and enable/start the service. After that, you can stop the script in your terminal (Ctrl+C); the bot will keep running under systemd and will start automatically at boot (and with lingering, even when you're not logged in).
+
 ---
 
 ## How it works
@@ -69,6 +71,32 @@ Leave it running. When you send a text message to your bot on Telegram, it will 
 - It runs `cursor agent --print --trust --force --workspace <repo_root> ...` so the agent can execute commands without interactive prompts.
 - The agent session is persisted in `telegram-bot/.cursor_agent_session`, so restarts of the bot keep one continuous conversation.
 - Run the bot from the repo root so `--workspace` points at your clone; open that same folder in Cursor when you want to work there.
+
+---
+
+## Optional: systemd and scheduled reminders
+
+You can run the bot under systemd so it starts at boot and keeps running without a login session (user lingering). You can also run **scheduled reminders**: at a set time the Cursor agent runs a prompt (e.g. “check the Bitcoin price and tell the user”) and the reply is sent to you on Telegram. Once the bot is running (step 5 above), you can ask the agent over Telegram to install the systemd units and enable lingering, then stop the script in your terminal.
+
+**Manual install** (or have the agent do it):
+
+1. **Copy the unit files** (edit paths in the files if your clone is not in `~/projects/cursor-claw`):
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   cp telegram-bot/systemd/telegram-agent-bot.service telegram-bot/systemd/telegram-reminders.service telegram-bot/systemd/telegram-reminders.timer ~/.config/systemd/user/
+   ```
+2. **Enable lingering** (so user services run without a session):
+   ```bash
+   loginctl enable-linger $USER
+   ```
+3. **Start the bot and the reminders timer**:
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable --now telegram-agent-bot.service
+   systemctl --user enable --now telegram-reminders.timer
+   ```
+
+Reminders are stored in `telegram-bot/reminders.json` (do not commit; it’s in `.gitignore`). Each entry has `"at"` (local time, `YYYY-MM-DDTHH:MM:SS`), and either `"text"` (fixed message sent at that time) or `"prompt"` (Cursor agent runs that prompt at that time and its reply is sent to you). The Cursor agent in this workspace can add reminders when you ask (e.g. “at 9am tomorrow check the BTC price and let me know”). You must have messaged the bot at least once so `telegram-bot/chat_id` exists.
 
 ---
 
