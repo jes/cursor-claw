@@ -12,13 +12,23 @@ Use a Telegram bot to talk to the [Cursor](https://cursor.com) agent from your p
 
 ## Setup
 
-### 1. Create a Telegram bot
+### 1. Check Cursor agent
+
+Before anything else, run the Cursor agent from a terminal and confirm it loads and works:
+
+```bash
+cursor agent
+```
+
+If it starts and you can interact with it (or at least see it respond), you’re good. Exit when done. The Telegram bot will invoke `cursor agent` for you; this step just avoids surprises later.
+
+### 2. Create a Telegram bot
 
 1. Open Telegram and message [@BotFather](https://t.me/BotFather).
 2. Send `/newbot` and follow the prompts (name and username).
 3. Copy the **token** BotFather gives you (e.g. `123456789:ABCdefGHI...`). Keep it secret; don’t commit it.
 
-### 2. Get your Telegram user ID
+### 3. Get your Telegram user ID
 
 From this repo’s root:
 
@@ -28,7 +38,7 @@ TELEGRAM_BOT_TOKEN='your_token_here' python3 telegram-bot/echo_user_ids.py
 
 Send any message to your new bot. The script will print your `user_id` (a number). Note it; you’ll need it in the next step. Stop the script with Ctrl+C.
 
-### 3. Configure the agent bot
+### 4. Configure the agent bot
 
 ```bash
 cp telegram-bot/config.example telegram-bot/config
@@ -41,7 +51,7 @@ Edit `telegram-bot/config` and set:
 
 **Do not commit `telegram-bot/config`.** It’s listed in `.gitignore`.
 
-### 4. Run the bot
+### 5. Run the bot
 
 Open a terminal **outside** Cursor (so the agent can run in the background). From the **clone root** of this repo:
 
