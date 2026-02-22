@@ -13,6 +13,7 @@ TELEGRAM_ALLOWED_USER_ID. Run from a terminal outside Cursor.
 """
 
 import os
+import re
 import sys
 import time
 import json
@@ -113,6 +114,13 @@ def send_chat_action(token, chat_id, action="typing"):
         api(token, "sendChatAction", chat_id=chat_id, action=action)
     except Exception:
         pass
+
+
+def collapse_blank_lines(text: str) -> str:
+    """Replace runs of 3+ newlines (multiple blank lines) with a single blank line (\\n\\n)."""
+    if not text:
+        return text
+    return re.sub(r"\n{3,}", "\n\n", text)
 
 
 def send_message(token, chat_id, text, parse_mode="Markdown"):
@@ -352,6 +360,7 @@ def main():
             send_chat_action(token, chat_id, "typing")
         response_text, session_id = result[0], result[1]
         save_session(session_id)
+        response_text = collapse_blank_lines(response_text or "")
         send_message(token, chat_id, response_text)
 
 

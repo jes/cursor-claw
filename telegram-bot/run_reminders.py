@@ -102,17 +102,25 @@ def get_agent_timeout():
     return timeout if timeout > 0 else 0  # 0 = unlimited
 
 
+REMINDER_INSTRUCTION = (
+    " [Your reply will be sent to the user on Telegram. "
+    "Do not run any script or command that sends a Telegram message yourself—just output the message content in your reply.]"
+)
+
+
 def run_agent_prompt(prompt):
     """Run Cursor agent with the given prompt (no session). Return response text or error string."""
     if not (prompt or "").strip():
         return "(empty prompt)"
+    # So the agent doesn't also send a message (e.g. via send_btc_gbp.py), causing duplicate delivery
+    full_prompt = (prompt.strip() + REMINDER_INSTRUCTION).strip()
     cmd = [
         "cursor", "agent", "--print", "--trust", "--force",
         "--workspace", REPO_ROOT,
         "--model", "Auto",
         "--output-format", "json",
     ]
-    cmd.append(prompt.strip())
+    cmd.append(full_prompt)
     timeout_sec = get_agent_timeout()
     try:
         result = subprocess.run(
