@@ -20,6 +20,7 @@ CONFIG_FILE = os.path.join(SCRIPT_DIR, "config")
 CHAT_ID_FILE = os.path.join(SCRIPT_DIR, "chat_id")
 REMINDERS_FILE = os.path.join(SCRIPT_DIR, "reminders.json")
 BASE = "https://api.telegram.org/bot"
+DEFAULT_AGENT_TIMEOUT = 0  # 0 = unlimited
 
 
 def load_config():
@@ -75,6 +76,32 @@ def send_message(token, chat_id, text):
         return json.loads(r.read().decode())
 
 
+def get_agent_timeout():
+    """Agent subprocess timeout in seconds. Config or env CURSOR_AGENT_TIMEOUT, else default."""
+    timeout = None
+    if os.path.isfile(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    k, v = k.strip(), v.strip().strip("'\"")
+                    if k == "CURSOR_AGENT_TIMEOUT" and v:
+                        try:
+                            timeout = int(v)
+                        except ValueError:
+                            pass
+                        break
+    if timeout is None:
+        try:
+            timeout = int(os.environ.get("CURSOR_AGENT_TIMEOUT", str(DEFAULT_AGENT_TIMEOUT)))
+        except ValueError:
+            timeout = DEFAULT_AGENT_TIMEOUT
+    return timeout if timeout > 0 else 0  # 0 = unlimited
+
+
 def run_agent_prompt(prompt):
     """Run Cursor agent with the given prompt (no session). Return response text or error string."""
     if not (prompt or "").strip():
@@ -86,13 +113,14 @@ def run_agent_prompt(prompt):
         "--output-format", "json",
     ]
     cmd.append(prompt.strip())
+    timeout_sec = get_agent_timeout()
     try:
         result = subprocess.run(
             cmd,
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=timeout_sec or None,  # 0 = unlimited
         )
         out = (result.stdout or "").strip()
         err = (result.stderr or "").strip()
@@ -125,7 +153,7 @@ def run_agent_prompt(prompt):
             response_text = err or "Agent exited with code %s" % result.returncode
         return response_text or "(no output)"
     except subprocess.TimeoutExpired:
-        return "Agent timed out after 5 minutes."
+        return "Agent timed out after %d seconds." % timeout_sec
     except Exception as e:
         return "Error running agent: %s" % e
 
