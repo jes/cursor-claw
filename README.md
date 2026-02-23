@@ -65,6 +65,23 @@ Leave it running. When you send a text message to your bot on Telegram, it will 
 
 ---
 
+## Sending images and files to the user
+
+The agent can send you images or files on Telegram by queuing them before replying:
+
+- **Images** (screenshots, diagrams, etc.): run `python3 telegram-bot/attach_image.py /path/to/image.png`. The image is copied to a pending directory; the next time the bot sends a reply, it will send the image(s) and then clear the queue.
+- **Any file** (PDFs, text, etc.): run `python3 telegram-bot/attach_file.py /path/to/file`. Same idea—files in the queue are sent with the next reply (images as photos, other files as documents).
+
+Example: to send a browser screenshot, the agent can run a headless browser (e.g. [clawfox](https://github.com/jes/clawfox)), take a screenshot, then run `attach_image.py` with the screenshot path before replying.
+
+---
+
+## Web browsing (for the agent)
+
+When the agent needs to look something up on the web, prefer **[clawfox](https://github.com/jes/clawfox)** if it’s installed: a CLI headless browser (Chromium) that the agent can drive with commands like `clawfox go <url>`, `clawfox show`, `clawfox screenshot`, `clawfox click "text=Submit"`. Screenshots go to `~/.clawfox/screenshots/`; the agent can then run `attach_image.py` on that path to send the screenshot to you on Telegram.
+
+---
+
 ## How it works
 
 - The bot only accepts messages from the user ID in `config`; others are ignored.

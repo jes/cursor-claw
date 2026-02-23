@@ -25,6 +25,11 @@ Chat context is lost each session. This file is the only persistent memory for t
 - **Systemd (optional)**: Units in `telegram-bot/systemd/`: copy to `~/.config/systemd/user/`, run `loginctl enable-linger $USER`, then `systemctl --user enable --now telegram-agent-bot.service`. For reminders: `systemctl --user enable --now telegram-reminders.timer`. Edit paths in the unit files if your clone is not in `~/projects/cursor-claw`.
 - **Reminders**: `telegram-bot/reminders.json` holds `{"reminders": [{"at": "YYYY-MM-DDTHH:MM:SS", "text": "…", "prompt": "…"}]}` (local time for `at`). Use `"text"` for a fixed message at that time. Use `"prompt"` to run the Cursor agent at that time and send its reply to the user on Telegram. `run_reminders.py` runs every minute (via timer); due reminders are removed from the file immediately before processing so the same reminder is never run twice.
 
+## Agent: web browsing and sending files
+
+- **Web browsing**: Prefer **clawfox** ([github.com/jes/clawfox](https://github.com/jes/clawfox)) when you need to browse: `clawfox go <url>`, `clawfox show`, `clawfox screenshot`, etc. Screenshots are in `~/.clawfox/screenshots/`.
+- **Sending images/files to the user on Telegram**: Run `telegram-bot/attach_image.py /path/to/image.png` (images) or `telegram-bot/attach_file.py /path/to/file` (any file). The bot sends everything in the pending dirs with your next reply and then deletes them. Use this e.g. after `clawfox screenshot` to send the user the screenshot.
+
 ## Projects / hosts
 
 - (Add project names, hosts, and one-line purpose as they come up.)
