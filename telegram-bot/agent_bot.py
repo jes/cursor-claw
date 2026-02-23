@@ -13,7 +13,6 @@ TELEGRAM_ALLOWED_USER_ID. Run from a terminal outside Cursor.
 """
 
 import os
-import re
 import sys
 import time
 import json
@@ -117,10 +116,21 @@ def send_chat_action(token, chat_id, action="typing"):
 
 
 def collapse_blank_lines(text: str) -> str:
-    """Replace runs of 3+ newlines (multiple blank lines) with a single blank line (\\n\\n)."""
+    """Collapse runs of consecutive blank lines (empty or whitespace-only) into a single blank line."""
     if not text:
         return text
-    return re.sub(r"\n{3,}", "\n\n", text)
+    lines = text.split("\n")
+    result = []
+    in_blank_run = False
+    for line in lines:
+        if not line.strip():  # blank: empty or whitespace-only
+            if not in_blank_run:
+                result.append("")
+                in_blank_run = True
+        else:
+            result.append(line)
+            in_blank_run = False
+    return "\n".join(result)
 
 
 def send_message(token, chat_id, text, parse_mode="Markdown"):
