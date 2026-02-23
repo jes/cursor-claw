@@ -18,7 +18,7 @@ import threading
 import urllib.request
 import urllib.error
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 TYPING_INTERVAL = 4  # Telegram typing indicator lasts ~5s; re-send before it expires
 DEFAULT_AGENT_TIMEOUT = 0  # 0 = unlimited; set CURSOR_AGENT_TIMEOUT in config or env to limit
@@ -32,6 +32,8 @@ CHAT_ID_FILE = os.path.join(SCRIPT_DIR, "chat_id")
 OFFSET_FILE = os.path.join(SCRIPT_DIR, ".telegram_offset")
 RECEIVED_IMAGES_DIR = os.path.join(SCRIPT_DIR, "received_images")
 LOGS_DIR = os.path.join(SCRIPT_DIR, "logs")
+PENDING_IMAGES_DIR = os.path.join(SCRIPT_DIR, "pending_images")
+PENDING_ATTACHMENTS_DIR = os.path.join(SCRIPT_DIR, "pending_attachments")
 
 
 def get_agent_timeout() -> int:
@@ -143,6 +145,130 @@ def send_message(token, chat_id, text, parse_mode="Markdown"):
                 api(token, "sendMessage", chat_id=chat_id, text=part)
             else:
                 raise
+
+
+def send_photo(token, chat_id, photo_path: str, caption: Optional[str] = None) -> None:
+    """Send a local file as a photo. photo_path must be absolute or relative to cwd."""
+    if not os.path.isfile(photo_path):
+        return
+    url = f"{BASE}{token}/sendPhoto"
+    with open(photo_path, "rb") as f:
+        photo_data = f.read()
+    boundary = "----FormBoundary" + os.urandom(16).hex()
+    head = (
+        f"--{boundary}\r\n"
+        f"Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n{chat_id}\r\n"
+        f"--{boundary}\r\n"
+        f"Content-Disposition: form-data; name=\"photo\"; filename=\"image.png\"\r\n"
+        f"Content-Type: image/png\r\n\r\n"
+    ).encode()
+    tail = f"\r\n--{boundary}--\r\n".encode()
+    body = head + photo_data + tail
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            json.loads(r.read().decode())
+    except Exception:
+        pass
+
+
+def send_document(token, chat_id, file_path: str) -> None:
+    """Send a local file as a document."""
+    if not os.path.isfile(file_path):
+        return
+    url = f"{BASE}{token}/sendDocument"
+    with open(file_path, "rb") as f:
+        file_data = f.read()
+    name = os.path.basename(file_path)
+    boundary = "----FormBoundary" + os.urandom(16).hex()
+    head = (
+        f"--{boundary}\r\n"
+        f"Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n{chat_id}\r\n"
+        f"--{boundary}\r\n"
+        f"Content-Disposition: form-data; name=\"document\"; filename=\"{name}\"\r\n"
+        f"Content-Type: application/octet-stream\r\n\r\n"
+    ).encode()
+    tail = f"\r\n--{boundary}--\r\n".encode()
+    body = head + file_data + tail
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            json.loads(r.read().decode())
+    except Exception:
+        pass
+
+
+def send_pending_images(token, chat_id) -> None:
+    """Send any images in PENDING_IMAGES_DIR as photos, then delete them."""
+    if not os.path.isdir(PENDING_IMAGES_DIR):
+        return
+    try:
+        for name in sorted(os.listdir(PENDING_IMAGES_DIR)):
+            path = os.path.join(PENDING_IMAGES_DIR, name)
+            if not os.path.isfile(path):
+                continue
+            lower = name.lower()
+            if not (lower.endswith(".png") or lower.endswith(".jpg") or lower.endswith(".jpeg") or lower.endswith(".gif") or lower.endswith(".webp")):
+                continue
+            try:
+                send_photo(token, chat_id, path)
+            except Exception:
+                pass
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+
+def send_pending_attachments(token, chat_id) -> None:
+    """Send any files in PENDING_ATTACHMENTS_DIR (images as photo, others as document), then delete them."""
+    if not os.path.isdir(PENDING_ATTACHMENTS_DIR):
+        return
+    try:
+        for name in sorted(os.listdir(PENDING_ATTACHMENTS_DIR)):
+            path = os.path.join(PENDING_ATTACHMENTS_DIR, name)
+            if not os.path.isfile(path):
+                continue
+            lower = name.lower()
+            try:
+                if any(lower.endswith(ext) for ext in _IMAGE_EXTENSIONS):
+                    send_photo(token, chat_id, path)
+                else:
+                    send_document(token, chat_id, path)
+            except Exception:
+                pass
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def extract_attach_image_paths(text: str) -> Tuple[List[str], str]:
+    """Return (list of existing file paths from 'attach-image: path' lines), and text with those lines removed."""
+    paths = []
+    prefix = "attach-image:"
+    lines = text.split("\n")
+    kept = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(prefix):
+            path = stripped[len(prefix):].strip()
+            if path:
+                cand = path if os.path.isabs(path) else os.path.normpath(os.path.join(REPO_ROOT, path))
+                if os.path.isfile(cand):
+                    paths.append(cand)
+            continue
+        kept.append(line)
+    return paths, "\n".join(kept)
 
 
 def load_session() -> Optional[str]:
@@ -344,7 +470,14 @@ def run_agent_streaming(
                             continue
                         to_send = text.strip()
                         if to_send:
-                            send_message(token, chat_id, collapse_blank_lines(to_send))
+                            send_pending_attachments(token, chat_id)
+                            send_pending_images(token, chat_id)
+                            attach_paths, text_without_attach = extract_attach_image_paths(to_send)
+                            for path in attach_paths:
+                                send_photo(token, chat_id, path)
+                            text_clean = collapse_blank_lines(text_without_attach).strip()
+                            if text_clean:
+                                send_message(token, chat_id, text_clean)
             finally:
                 proc.wait()
                 err = proc.stderr.read() if proc.stderr else ""
