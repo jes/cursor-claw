@@ -27,7 +27,7 @@ Chat context is lost each session. This file is the only persistent memory for t
 
 ## Agent: web browsing and sending files
 
-- **Web browsing**: Prefer **clawfox** ([github.com/jes/clawfox](https://github.com/jes/clawfox)) when you need to browse: `clawfox go <url>`, `clawfox show`, `clawfox screenshot`, etc. Screenshots are in `~/.clawfox/screenshots/`.
+- **Web browsing**: Prefer **clawfox** ([github.com/jes/clawfox](https://github.com/jes/clawfox)) when you need to browse: `clawfox go <url>`, `clawfox show`, `clawfox screenshot`, etc. Screenshots are in `~/.clawfox/screenshots/`. **Persistent profile** (`~/.clawfox/browser_profile/`): cookies and logins survive daemon restarts—user can log in once in a headful session and you reuse it. **Headful**: `clawfox stop` then `clawfox --headful go <url>` (put `--headful` before the subcommand) for a visible window so the user can log in; then you operate the same session. **Tabs**: `clawfox tabs` lists tabs; `clawfox focus_tab <substring>` switches to a tab by URL substring.
 - **Sending images/files to the user on Telegram**: Run `telegram-bot/attach_image.py /path/to/image.png` (images) or `telegram-bot/attach_file.py /path/to/file` (any file). The bot sends everything in the pending dirs with your next reply and then deletes them. Use this e.g. after `clawfox screenshot` to send the user the screenshot.
 
 ## Projects / hosts

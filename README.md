@@ -78,7 +78,7 @@ Example: to send a browser screenshot, the agent can run a headless browser (e.g
 
 ## Web browsing (for the agent)
 
-When the agent needs to look something up on the web, prefer **[clawfox](https://github.com/jes/clawfox)** if it’s installed: a CLI headless browser (Chromium) that the agent can drive with commands like `clawfox go <url>`, `clawfox show`, `clawfox screenshot`, `clawfox click "text=Submit"`. Screenshots go to `~/.clawfox/screenshots/`; the agent can then run `attach_image.py` on that path to send the screenshot to you on Telegram.
+When the agent needs to look something up on the web, prefer **[clawfox](https://github.com/jes/clawfox)** if it’s installed: a CLI headless browser (Chromium) that the agent can drive with commands like `clawfox go <url>`, `clawfox show`, `clawfox screenshot`, `clawfox click "text=Submit"`. Screenshots go to `~/.clawfox/screenshots/`; the agent can then run `attach_image.py` on that path to send the screenshot to you on Telegram. Clawfox uses a **persistent profile** (`~/.clawfox/browser_profile/`), so if you log in somewhere in a headful session, the agent can reuse that session later. For a visible window so you can log in, run `clawfox --headful go <url>` (put `--headful` before the subcommand); then the agent uses the same browser. With multiple tabs, `clawfox tabs` and `clawfox focus_tab <substring>` let the agent switch to the right tab.
 
 ---
 
