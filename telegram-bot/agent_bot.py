@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """
 Telegram bot: only accepts messages from the allowed user (see config); forwards
-them to Cursor agent and sends the agent's response back. Uses --output-format json
+them to Cursor agent and sends the agent's response back. Uses --output-format stream-json
 and --resume to keep one conversation session across restarts (session_id stored in
 .cursor_agent_session). All other users are dropped.
-
-Supports text and photos: photos are downloaded to telegram-bot/received_images/
-and their workspace-relative paths are added to the prompt so the agent can read them.
 
 Config: create telegram-bot/config from config.example with TELEGRAM_BOT_TOKEN and
 TELEGRAM_ALLOWED_USER_ID. Run from a terminal outside Cursor.
@@ -20,6 +17,7 @@ import subprocess
 import threading
 import urllib.request
 import urllib.error
+from datetime import datetime
 from typing import Optional, Tuple
 
 TYPING_INTERVAL = 4  # Telegram typing indicator lasts ~5s; re-send before it expires
@@ -33,6 +31,7 @@ SESSION_FILE = os.path.join(SCRIPT_DIR, ".cursor_agent_session")
 CHAT_ID_FILE = os.path.join(SCRIPT_DIR, "chat_id")
 OFFSET_FILE = os.path.join(SCRIPT_DIR, ".telegram_offset")
 RECEIVED_IMAGES_DIR = os.path.join(SCRIPT_DIR, "received_images")
+LOGS_DIR = os.path.join(SCRIPT_DIR, "logs")
 
 
 def get_agent_timeout() -> int:
@@ -217,69 +216,172 @@ def save_offset(offset: int) -> None:
         print("Could not save offset: %s" % e, file=sys.stderr)
 
 
-def run_agent(prompt: str, resume_session: Optional[str]) -> Tuple[str, Optional[str]]:
-    """Run cursor agent directly; persist session_id so restarts keep context."""
+def _parse_session_and_final_output(full_stdout: str, full_stderr: str, returncode: int) -> Tuple[str, Optional[str]]:
+    """Parse full stdout for session_id and final displayable result. Returns (response_text, session_id)."""
+    session_id = None
+    response_text = None
+    for line in full_stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        sid = obj.get("session_id") or obj.get("sessionId") or obj.get("chatId")
+        if sid:
+            session_id = str(sid)
+        if "result" in obj and isinstance(obj["result"], str):
+            response_text = obj["result"].strip()
+        elif response_text is None:
+            for key in ("text", "content", "response", "message", "output"):
+                if key in obj and isinstance(obj[key], str):
+                    response_text = obj[key]
+                    break
+    if response_text is None and full_stdout:
+        try:
+            obj = json.loads(full_stdout.strip().split("\n")[-1] or "{}")
+            session_id = session_id or obj.get("session_id") or obj.get("sessionId")
+            response_text = obj.get("result") or obj.get("text") or obj.get("content") or full_stdout
+            if isinstance(response_text, dict):
+                response_text = response_text.get("content", str(response_text))
+        except (json.JSONDecodeError, IndexError):
+            response_text = full_stdout
+    if returncode != 0 and not response_text:
+        response_text = full_stderr or "Agent exited with code %s" % returncode
+    return response_text or "(no output)", session_id
+
+
+def run_agent_streaming(
+    prompt: str,
+    resume_session: Optional[str],
+    token: str,
+    chat_id: int,
+) -> Optional[str]:
+    """
+    Run cursor agent with stream-json: ignore "thinking" and "result". Send
+    every assistant message as a Telegram message (no --stream-partial-output,
+    so each message is a full turn). Skip whitespace-only. Typing indicator
+    until process done. Raw JSON stream written to telegram-bot/logs/<timestamp>.log.
+    Returns session_id for persistence.
+    """
     if not prompt.strip():
-        return "(no prompt)", resume_session
+        send_message(token, chat_id, "(no prompt)")
+        return resume_session
     cmd = [
         "cursor", "agent", "--print", "--trust", "--force",
         "--workspace", REPO_ROOT,
         "--model", "Auto",
-        "--output-format", "json",
+        "--output-format", "stream-json",
     ]
     if resume_session:
         cmd.extend(["--resume", resume_session])
     cmd.append(prompt)
     timeout_sec = get_agent_timeout()
-    try:
-        result = subprocess.run(
-            cmd,
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec or None,  # 0 = unlimited
-        )
-        out = (result.stdout or "").strip()
-        err = (result.stderr or "").strip()
+    full_stdout_lines = []
+    full_stderr_lines = []
+    lock = threading.Lock()
+    process_done = threading.Event()
+    proc_ref = [None]  # so main thread can kill on timeout
 
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    log_name = datetime.now().strftime("%Y-%m-%dT%H-%M-%S") + ".log"
+    log_path = os.path.join(LOGS_DIR, log_name)
+
+    def reader():
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=REPO_ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+            proc_ref[0] = proc
+            try:
+                with open(log_path, "w") as logf:
+                    for line in iter(proc.stdout.readline, ""):
+                        with lock:
+                            full_stdout_lines.append(line)
+                        logf.write(line)
+                        logf.flush()
+                        line_stripped = line.strip()
+                        if not line_stripped:
+                            continue
+                        try:
+                            obj = json.loads(line_stripped)
+                        except json.JSONDecodeError:
+                            continue
+                        msg_type = (obj.get("role") or obj.get("type") or obj.get("messageType") or "").lower()
+                        if msg_type == "thinking":
+                            continue
+                        if msg_type == "result":
+                            continue
+                        if msg_type != "assistant":
+                            continue
+                        # Stream-json: text in message.content[].text
+                        text = None
+                        msg = obj.get("message")
+                        if isinstance(msg, dict):
+                            content = msg.get("content")
+                            if isinstance(content, list):
+                                parts = []
+                                for item in content:
+                                    if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
+                                        parts.append(item["text"])
+                                if parts:
+                                    text = "".join(parts)
+                        if text is None:
+                            text = (
+                                obj.get("content")
+                                or obj.get("text")
+                                or obj.get("delta")
+                                or obj.get("result")
+                                or obj.get("output")
+                            )
+                        if not isinstance(text, str):
+                            continue
+                        to_send = text.strip()
+                        if to_send:
+                            send_message(token, chat_id, collapse_blank_lines(to_send))
+            finally:
+                proc.wait()
+                err = proc.stderr.read() if proc.stderr else ""
+                if err:
+                    full_stderr_lines.append(err)
+        except Exception as e:
+            send_message(token, chat_id, "Error running agent: %s" % e)
+        finally:
+            process_done.set()
+
+    t = threading.Thread(target=reader, daemon=False)
+    t.start()
+    last_typing = 0.0
+    start_time = time.time()
+    timed_out = False
+
+    while not process_done.is_set():
+        time.sleep(1)
+        now = time.time()
+        if timeout_sec and (now - start_time) >= timeout_sec:
+            p = proc_ref[0]
+            if p and p.poll() is None:
+                p.kill()
+            send_message(token, chat_id, "Agent timed out after %s seconds." % timeout_sec)
+            timed_out = True
+            break
+        if now - last_typing >= TYPING_INTERVAL:
+            send_chat_action(token, chat_id, "typing")
+            last_typing = now
+
+    t.join(timeout=10)
+    full_stdout = "".join(full_stdout_lines)
+    full_stderr = "".join(full_stderr_lines)
+    response_text, session_id = _parse_session_and_final_output(full_stdout, full_stderr, 0)
+    if not session_id:
         session_id = resume_session
-        response_text = None
-        for line in out.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            sid = obj.get("session_id") or obj.get("sessionId") or obj.get("chatId")
-            if sid:
-                session_id = str(sid)
-            if "result" in obj and isinstance(obj["result"], str):
-                response_text = obj["result"].strip()
-            elif response_text is None:
-                for key in ("text", "content", "response", "message", "output"):
-                    if key in obj and isinstance(obj[key], str):
-                        response_text = obj[key]
-                        break
-
-        if response_text is None and out:
-            try:
-                obj = json.loads(out)
-                session_id = obj.get("session_id") or obj.get("sessionId") or session_id
-                response_text = obj.get("result") or obj.get("text") or obj.get("content") or out
-                if isinstance(response_text, dict):
-                    response_text = response_text.get("content", str(response_text))
-            except json.JSONDecodeError:
-                response_text = out
-
-        if result.returncode != 0 and not response_text:
-            response_text = err or "Agent exited with code %s" % result.returncode
-        return response_text or "(no output)", session_id
-    except subprocess.TimeoutExpired:
-        return "Agent timed out after %s seconds." % timeout_sec, resume_session
-    except Exception as e:
-        return "Error running agent: %s" % e, resume_session
+    return session_id
 
 
 def main():
@@ -357,21 +459,8 @@ def main():
         else:
             print("Running agent for prompt: %s..." % text[:60], file=sys.stderr)
         send_chat_action(token, chat_id, "typing")
-        result = [None, None]  # [response_text, session_id]
-        done = threading.Event()
-
-        def run():
-            result[0], result[1] = run_agent(text, session_id)
-            done.set()
-
-        t = threading.Thread(target=run)
-        t.start()
-        while not done.wait(TYPING_INTERVAL):
-            send_chat_action(token, chat_id, "typing")
-        response_text, session_id = result[0], result[1]
+        session_id = run_agent_streaming(text, session_id, token, chat_id)
         save_session(session_id)
-        response_text = collapse_blank_lines(response_text or "")
-        send_message(token, chat_id, response_text)
 
 
 if __name__ == "__main__":

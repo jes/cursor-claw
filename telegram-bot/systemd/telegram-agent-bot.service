@@ -1,7 +1,7 @@
 # User service: Telegram bot that forwards messages to Cursor agent.
 # Install: copy to ~/.config/systemd/user/
 #   cp telegram-bot/systemd/telegram-agent-bot.service ~/.config/systemd/user/
-# Edit the WorkingDirectory and ExecStart paths below if your repo is not in ~/projects/cursor-claw.
+# Then edit the paths below if your repo is not in ~/projects/cursor-claw.
 # Enable lingering so it runs without a login session:
 #   loginctl enable-linger $USER
 # Start:

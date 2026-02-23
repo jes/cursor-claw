@@ -9,3 +9,5 @@ telegram-bot/chat_id
 telegram-bot/.telegram_offset
 telegram-bot/reminders.json
 telegram-bot/received_images/
+telegram-bot/logs/
+__pycache__/
