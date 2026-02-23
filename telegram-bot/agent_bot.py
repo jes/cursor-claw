@@ -18,7 +18,7 @@ import threading
 import urllib.request
 import urllib.error
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 TYPING_INTERVAL = 4  # Telegram typing indicator lasts ~5s; re-send before it expires
 DEFAULT_AGENT_TIMEOUT = 0  # 0 = unlimited; set CURSOR_AGENT_TIMEOUT in config or env to limit
@@ -252,25 +252,6 @@ def send_pending_attachments(token, chat_id) -> None:
         pass
 
 
-def extract_attach_image_paths(text: str) -> Tuple[List[str], str]:
-    """Return (list of existing file paths from 'attach-image: path' lines), and text with those lines removed."""
-    paths = []
-    prefix = "attach-image:"
-    lines = text.split("\n")
-    kept = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith(prefix):
-            path = stripped[len(prefix):].strip()
-            if path:
-                cand = path if os.path.isabs(path) else os.path.normpath(os.path.join(REPO_ROOT, path))
-                if os.path.isfile(cand):
-                    paths.append(cand)
-            continue
-        kept.append(line)
-    return paths, "\n".join(kept)
-
-
 def load_session() -> Optional[str]:
     if os.path.isfile(SESSION_FILE):
         try:
@@ -472,12 +453,7 @@ def run_agent_streaming(
                         if to_send:
                             send_pending_attachments(token, chat_id)
                             send_pending_images(token, chat_id)
-                            attach_paths, text_without_attach = extract_attach_image_paths(to_send)
-                            for path in attach_paths:
-                                send_photo(token, chat_id, path)
-                            text_clean = collapse_blank_lines(text_without_attach).strip()
-                            if text_clean:
-                                send_message(token, chat_id, text_clean)
+                            send_message(token, chat_id, collapse_blank_lines(to_send))
             finally:
                 proc.wait()
                 err = proc.stderr.read() if proc.stderr else ""

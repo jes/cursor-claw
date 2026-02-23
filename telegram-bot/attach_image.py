@@ -9,7 +9,7 @@ Usage:
   python3 attach_image.py screenshot1.png screenshot2.png
 
 Use this when you want to send images (e.g. browser screenshots) with the
-next bot reply, without embedding "attach-image: path" in the agent output.
+next bot reply.
 """
 
 import os
