@@ -32,4 +32,10 @@ Chat context is lost each session. This file is the only persistent memory for t
 
 ## Projects / hosts
 
-- (Add project names, hosts, and one-line purpose as they come up.)
+- **gridiron** (`/home/jes/gridiron`): Automated IG trading stack run from user crontab (capture/report every 5m, news + Investegate every 10m, trading-agent hourly weekdays, epic-map nightly). Main operator controls:
+  - **Pause trading only**: remove/comment cron line `15 9-16 * * 1-5 ... run-trading-agent.sh` in `crontab -e`, or enable `go run ./cmd/igctl killswitch --on`.
+  - **Pause all automation**: comment/delete the `# BEGIN gridiron-managed ... # END gridiron-managed` block in user crontab.
+  - **Resume**: restore cron lines and (if used) `go run ./cmd/igctl killswitch --off`.
+  - **Status/health checks**: `go run ./cmd/igctl daemon status`, `go run ./cmd/igctl health`, inspect `.alerts/*.failed`/`.alerts/*.failcount`, and logs in `/home/jes/gridiron/logs` plus `/home/jes/gridiron/.igctl/cron.log`.
+  - **News archive**: `data/news-wire/index.jsonl` is rebuilt newest-first each news scrape; scan from the top for fresh headlines, search `data/news-wire/*.json` for older items.
+  - **Cron + Go**: gridiron cron scripts resolve `GO_BIN` (fallback `/usr/local/go/bin/go`) so jobs are not dependent on cron’s minimal `PATH`.
