@@ -9,6 +9,7 @@ telegram-bot/chat_id
 telegram-bot/.telegram_offset
 telegram-bot/reminders.json
 telegram-bot/received_images/
+telegram-bot/received_documents/
 telegram-bot/logs/
 telegram-bot/pending_images/
 telegram-bot/pending_attachments/

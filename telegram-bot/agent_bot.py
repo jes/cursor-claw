@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Telegram bot: only accepts messages from the allowed user (see config); forwards
-them to Cursor agent and sends the agent's response back. Uses --output-format stream-json
+them to Cursor agent and sends the agent's response back. Accepts photos and file
+attachments (e.g. PDF); files are saved under telegram-bot/received_documents/.
+Uses --output-format stream-json
 and --resume to keep one conversation session across restarts (session_id stored in
 .cursor_agent_session). All other users are dropped.
 
@@ -31,6 +33,7 @@ SESSION_FILE = os.path.join(SCRIPT_DIR, ".cursor_agent_session")
 CHAT_ID_FILE = os.path.join(SCRIPT_DIR, "chat_id")
 OFFSET_FILE = os.path.join(SCRIPT_DIR, ".telegram_offset")
 RECEIVED_IMAGES_DIR = os.path.join(SCRIPT_DIR, "received_images")
+RECEIVED_DOCUMENTS_DIR = os.path.join(SCRIPT_DIR, "received_documents")
 LOGS_DIR = os.path.join(SCRIPT_DIR, "logs")
 PENDING_IMAGES_DIR = os.path.join(SCRIPT_DIR, "pending_images")
 PENDING_ATTACHMENTS_DIR = os.path.join(SCRIPT_DIR, "pending_attachments")
@@ -280,7 +283,17 @@ def save_chat_id(chat_id: int) -> None:
         print("Could not save chat_id: %s" % e, file=sys.stderr)
 
 
-def download_telegram_photo(token: str, file_id: str, dest_path: str) -> bool:
+def _safe_document_filename(name: str) -> str:
+    base = os.path.basename((name or "").strip()) or "file"
+    if base in (".", ".."):
+        base = "file"
+    if len(base) > 180:
+        root, ext = os.path.splitext(base)
+        base = (root[:160] + ext) if ext else root[:180]
+    return base
+
+
+def download_telegram_file(token: str, file_id: str, dest_path: str) -> bool:
     """Download a Telegram file by file_id to dest_path. Returns True on success."""
     try:
         out = api(token, "getFile", file_id=file_id)
@@ -289,18 +302,22 @@ def download_telegram_photo(token: str, file_id: str, dest_path: str) -> bool:
         file_path = (out.get("result") or {}).get("file_path")
         if not file_path:
             return False
-        # getFile returns file_path like "photos/file_0.jpg"; download at:
         url = "https://api.telegram.org/file/bot%s/%s" % (token, file_path)
         req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=120) as r:
             data = r.read()
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         with open(dest_path, "wb") as f:
             f.write(data)
         return True
     except Exception as e:
-        print("Download photo failed: %s" % e, file=sys.stderr)
+        print("Download file failed: %s" % e, file=sys.stderr)
         return False
+
+
+def download_telegram_photo(token: str, file_id: str, dest_path: str) -> bool:
+    """Download a Telegram photo by file_id to dest_path. Returns True on success."""
+    return download_telegram_file(token, file_id, dest_path)
 
 
 def load_offset() -> int:
@@ -520,6 +537,7 @@ def main():
         # Collect all new messages from allowed user (batch: e.g. 3 messages sent while idle)
         batch_texts = []
         batch_image_paths = []  # workspace-relative paths for agent
+        batch_document_paths = []  # workspace-relative paths for agent (PDF etc.)
         chat_id = None
         for i, upd in enumerate(updates):
             msg = upd.get("message") or upd.get("edited_message")
@@ -546,10 +564,24 @@ def main():
                 caption = (msg.get("caption") or "").strip()
                 if caption:
                     batch_texts.append(caption)
+            doc = msg.get("document")
+            if isinstance(doc, dict) and doc.get("file_id"):
+                os.makedirs(RECEIVED_DOCUMENTS_DIR, exist_ok=True)
+                orig_name = doc.get("file_name") or "file"
+                safe = _safe_document_filename(orig_name)
+                local_name = "doc_%s_%s_%s" % (upd["update_id"], i, safe)
+                dest_path = os.path.join(RECEIVED_DOCUMENTS_DIR, local_name)
+                if download_telegram_file(token, doc["file_id"], dest_path):
+                    batch_document_paths.append(
+                        os.path.join("telegram-bot", "received_documents", local_name)
+                    )
+                cap = (msg.get("caption") or "").strip()
+                if cap:
+                    batch_texts.append(cap)
         # Advance offset past entire batch so we don't re-process
         offset = updates[-1]["update_id"] + 1
         save_offset(offset)
-        if not batch_texts and not batch_image_paths:
+        if not batch_texts and not batch_image_paths and not batch_document_paths:
             continue
         if chat_id is None:
             continue
@@ -560,6 +592,11 @@ def main():
             text += "\n\n[User sent %d image(s). They are in the workspace at: %s. Look at them and respond accordingly.]" % (
                 len(batch_image_paths),
                 ", ".join(batch_image_paths),
+            )
+        if batch_document_paths:
+            text += "\n\n[User sent %d file(s). They are in the workspace at: %s. Read the file(s) and respond accordingly.]" % (
+                len(batch_document_paths),
+                ", ".join(batch_document_paths),
             )
         if not text.strip():
             continue
