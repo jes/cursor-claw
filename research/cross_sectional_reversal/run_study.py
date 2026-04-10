@@ -43,6 +43,15 @@ from quality import filter_panel, winsorize_cross_section  # noqa: E402
 from universe import ftse100_yahoo_symbols, sp500_yahoo_symbols  # noqa: E402
 from yahoo_v8 import download_symbol  # noqa: E402
 
+STRATEGIES = [
+    ("H1_prev_intraday_winners_next_intraday", "r_oc_lag1", "r_oc", False),
+    ("H1_prev_intraday_losers_next_intraday", "r_oc_lag1", "r_oc", True),
+    ("H2_intraday_losers_next_overnight", "r_oc", "overnight_fwd", True),
+    ("H3_overnight_losers_next_intraday", "r_co", "r_oc", True),
+    ("H3_overnight_winners_next_intraday", "r_co", "r_oc", False),
+    ("H4_five_day_losers_next_five_days", "r_cc_5", "r_cc_fwd5", True),
+]
+
 
 def _parse_date(s: str) -> pd.Timestamp:
     return pd.Timestamp(s).normalize()
@@ -194,7 +203,50 @@ def run_strategy(
     }
 
 
-def main() -> None:
+def execute_backtest(args: argparse.Namespace) -> tuple[list[dict], pd.DataFrame]:
+    """
+    Run download, filters, all STRATEGIES. Returns (summaries, daily_long DataFrame).
+    """
+    winsor_q = args.winsorize if 0 < args.winsorize < 0.5 else 0.0
+
+    raw = fetch_raw_panel(args)
+    if raw.empty:
+        return [], pd.DataFrame()
+
+    clean = filter_panel(
+        raw,
+        leg_low=args.leg_low,
+        leg_high=args.leg_high,
+        min_trading_days=args.min_days,
+        min_avg_close=args.min_avg_close,
+    )
+    print(
+        "After quality filters: %d tickers, %d rows"
+        % (clean["ticker"].nunique(), len(clean)),
+        file=sys.stderr,
+    )
+    if clean.empty:
+        return [], pd.DataFrame()
+
+    panel = enrich_return_columns(clean)
+
+    summaries = []
+    daily_frames = []
+    for name, sig, ret, bottom in STRATEGIES:
+        r = run_strategy(panel, name, sig, ret, bottom, winsor_q, args)
+        summaries.append({k: v for k, v in r.items() if k != "daily"})
+        if "daily" in r and not r["daily"].empty:
+            d = r["daily"].copy()
+            d["strategy"] = name
+            daily_frames.append(d)
+
+    daily_combined = (
+        pd.concat(daily_frames, ignore_index=True) if daily_frames else pd.DataFrame()
+    )
+    return summaries, daily_combined
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Cross-sectional reversal backtests (cleaned Yahoo data)")
     p.add_argument("--universe", choices=["sp500", "ftse100"], default="sp500")
     p.add_argument("--symbols-file", help="One ticker per line (overrides --universe)")
@@ -225,55 +277,20 @@ def main() -> None:
     )
     p.add_argument("--out-json", help="Write summary JSON (no daily series)")
     p.add_argument("--out-daily", help="Write combined daily CSV for all strategies")
+    p.add_argument("--plot", help="Write equity curve PNG to this path")
+    return p
 
+
+def main() -> None:
+    p = build_arg_parser()
     args = p.parse_args()
     if args.no_min_price:
         args.min_avg_close = None
 
-    winsor_q = args.winsorize if 0 < args.winsorize < 0.5 else 0.0
-
-    raw = fetch_raw_panel(args)
-    if raw.empty:
-        print("No price data downloaded.", file=sys.stderr)
+    summaries, daily_combined = execute_backtest(args)
+    if not summaries and daily_combined.empty:
+        print("No price data or no tickers passed filters.", file=sys.stderr)
         sys.exit(1)
-
-    min_close = None if args.min_avg_close is None else args.min_avg_close
-    clean = filter_panel(
-        raw,
-        leg_low=args.leg_low,
-        leg_high=args.leg_high,
-        min_trading_days=args.min_days,
-        min_avg_close=min_close,
-    )
-    print(
-        "After quality filters: %d tickers, %d rows"
-        % (clean["ticker"].nunique(), len(clean)),
-        file=sys.stderr,
-    )
-    if clean.empty:
-        print("No tickers passed filters.", file=sys.stderr)
-        sys.exit(1)
-
-    panel = enrich_return_columns(clean)
-
-    strategies = [
-        ("H1_prev_intraday_winners_next_intraday", "r_oc_lag1", "r_oc", False),
-        ("H1_prev_intraday_losers_next_intraday", "r_oc_lag1", "r_oc", True),
-        ("H2_intraday_losers_next_overnight", "r_oc", "overnight_fwd", True),
-        ("H3_overnight_losers_next_intraday", "r_co", "r_oc", True),
-        ("H3_overnight_winners_next_intraday", "r_co", "r_oc", False),
-        ("H4_five_day_losers_next_five_days", "r_cc_5", "r_cc_fwd5", True),
-    ]
-
-    summaries = []
-    daily_frames = []
-    for name, sig, ret, bottom in strategies:
-        r = run_strategy(panel, name, sig, ret, bottom, winsor_q, args)
-        summaries.append({k: v for k, v in r.items() if k != "daily"})
-        if "daily" in r and not r["daily"].empty:
-            d = r["daily"].copy()
-            d["strategy"] = name
-            daily_frames.append(d)
 
     print("\n=== Caveats ===", file=sys.stderr)
     print(
@@ -296,6 +313,11 @@ def main() -> None:
         if "error" in s:
             print("  %s" % s["error"])
             continue
+        if s["strategy"].startswith("H4_"):
+            print(
+                "  NOTE: H4 assigns 5-day-forward return each day; compounded CAGR/total is not a tradable path.",
+                file=sys.stderr,
+            )
         print("  Spearman(signal, fwd) mean: %.4f" % s["spearman_signal_fwd_mean"])
         for label, block in [
             ("net_full", s["net_full"]),
@@ -329,8 +351,28 @@ def main() -> None:
         with open(args.out_json, "w") as f:
             json.dump(out_j, f, indent=2, default=str)
 
-    if args.out_daily and daily_frames:
-        pd.concat(daily_frames, ignore_index=True).to_csv(args.out_daily, index=False)
+    if args.out_daily and not daily_combined.empty:
+        daily_combined.to_csv(args.out_daily, index=False)
+
+    if args.plot:
+        if daily_combined.empty:
+            print("Cannot --plot: no daily strategy returns.", file=sys.stderr)
+            sys.exit(1)
+        from plot_equity import plot_strategy_equity
+
+        title = "%s %s..%s (roundtrip %sbps)" % (
+            args.universe,
+            args.start,
+            args.end,
+            args.roundtrip_bps,
+        )
+        plot_strategy_equity(
+            daily_combined,
+            args.plot,
+            train_frac=args.train_frac,
+            title=title,
+        )
+        print("Wrote plot %s" % os.path.abspath(args.plot), file=sys.stderr)
 
 
 if __name__ == "__main__":
