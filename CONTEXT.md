@@ -39,4 +39,5 @@ Chat context is lost each session. This file is the only persistent memory for t
   - **Status/health checks**: `go run ./cmd/igctl daemon status`, `go run ./cmd/igctl health`, inspect `.alerts/*.failed`/`.alerts/*.failcount`, and logs in `/home/jes/gridiron/logs` plus `/home/jes/gridiron/.igctl/cron.log`.
   - **News archive**: `data/news-wire/index.jsonl` is rebuilt newest-first each news scrape; scan from the top for fresh headlines, search `data/news-wire/*.json` for older items.
   - **Agent stance**: prompts in `~/gridiron/docs/` require **minimum deployment when flat** (one best passing idea at minimum compliant size) so optional 100% cash is not the default when gates pass; hard risk limits in `agent-risk-policy.md` still bind.
+  - **`igctl` order policy**: on **IG demo** API, **`relax_open_policy` defaults on** (spread/liquidity/event/news gates skipped for opens; kill switch + size still enforced). Override with `relax_open_policy: false` in `igctl.config.json` or `IGCTL_STRICT_OPEN_POLICY=1`.
   - **Cron + Go**: gridiron cron scripts resolve `GO_BIN` (fallback `/usr/local/go/bin/go`) so jobs are not dependent on cron’s minimal `PATH`.
