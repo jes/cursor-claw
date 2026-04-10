@@ -38,4 +38,5 @@ Chat context is lost each session. This file is the only persistent memory for t
   - **Resume**: restore cron lines and (if used) `go run ./cmd/igctl killswitch --off`.
   - **Status/health checks**: `go run ./cmd/igctl daemon status`, `go run ./cmd/igctl health`, inspect `.alerts/*.failed`/`.alerts/*.failcount`, and logs in `/home/jes/gridiron/logs` plus `/home/jes/gridiron/.igctl/cron.log`.
   - **News archive**: `data/news-wire/index.jsonl` is rebuilt newest-first each news scrape; scan from the top for fresh headlines, search `data/news-wire/*.json` for older items.
+  - **Agent stance**: prompts in `~/gridiron/docs/` require **minimum deployment when flat** (one best passing idea at minimum compliant size) so optional 100% cash is not the default when gates pass; hard risk limits in `agent-risk-policy.md` still bind.
   - **Cron + Go**: gridiron cron scripts resolve `GO_BIN` (fallback `/usr/local/go/bin/go`) so jobs are not dependent on cron’s minimal `PATH`.
