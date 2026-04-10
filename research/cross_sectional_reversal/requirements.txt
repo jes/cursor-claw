@@ -1,0 +1,5 @@
+# Optional: only pyarrow needed for Parquet cache (pandas may already pull it).
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14.0
+lxml>=4.9
