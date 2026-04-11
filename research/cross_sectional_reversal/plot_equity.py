@@ -1,4 +1,4 @@
-"""Plot cumulative equity curves from long-format daily backtest output."""
+"""Plot cumulative equity curves from long-format backtest output."""
 
 from __future__ import annotations
 
@@ -17,13 +17,8 @@ _STRATEGY_LABELS = {
     "H2_intraday_losers_next_overnight": "H2 intra lose → overnight",
     "H3_overnight_losers_next_intraday": "H3 ov lose → intraday",
     "H3_overnight_winners_next_intraday": "H3 ov win → intraday",
-    "H4_five_day_losers_next_five_days": "H4 5d lose → next 5d",
+    "H4_five_day_losers_next_five_days": "H4 5d lose → next 5d (non-overlap)",
 }
-
-
-# H4 uses same-day assignment of a 5-day-forward return; compounding those daily
-# implies overlapping holds and is not a tradable equity curve — omit from chart.
-_EXCLUDE_FROM_CHART = frozenset({"H4_five_day_losers_next_five_days"})
 
 
 def plot_strategy_equity(
@@ -36,23 +31,22 @@ def plot_strategy_equity(
 ) -> str:
     """
     daily_long: columns date, portfolio_return_net, strategy.
-    Saves PNG to out_path. Returns absolute path.
+    Sparse strategies (e.g. H4 every 5th day) are forward-filled on the union
+    of all dates so curves share a time axis (flat between rebalances).
     """
     if daily_long.empty:
         raise ValueError("daily_long is empty; nothing to plot")
 
     daily_long = daily_long.copy()
     daily_long["date"] = pd.to_datetime(daily_long["date"])
-    daily_long = daily_long[~daily_long["strategy"].isin(_EXCLUDE_FROM_CHART)]
-    if daily_long.empty:
-        raise ValueError("No strategies left to plot after exclusions")
+    all_dates = sorted(daily_long["date"].unique())
+    aidx = pd.DatetimeIndex(all_dates)
 
     fig, ax = plt.subplots(figsize=(12, 7), dpi=dpi)
-    uniq_dates = sorted(daily_long["date"].unique())
-    if uniq_dates:
-        cut_i = int(len(uniq_dates) * train_frac)
-        cut_i = max(0, min(cut_i, len(uniq_dates) - 1))
-        cut_date = uniq_dates[cut_i]
+    if len(all_dates):
+        cut_i = int(len(all_dates) * train_frac)
+        cut_i = max(0, min(cut_i, len(all_dates) - 1))
+        cut_date = all_dates[cut_i]
         ax.axvline(
             cut_date,
             color="0.35",
@@ -63,26 +57,30 @@ def plot_strategy_equity(
         )
 
     cmap = plt.cm.tab10
-    for i, (strat, g) in enumerate(
-        daily_long.groupby("strategy", sort=False)
-    ):
+    for i, (strat, g) in enumerate(daily_long.groupby("strategy", sort=False)):
         g = g.sort_values("date")
         if g.empty:
             continue
         col = "portfolio_return_net" if "portfolio_return_net" in g.columns else "portfolio_return"
-        eq = (1.0 + g[col].astype(float)).cumprod()
+        idx = pd.DatetimeIndex(g["date"])
+        ser = pd.Series((1.0 + g[col].astype(float)).cumprod().values, index=idx)
+        fv = ser.first_valid_index()
+        if fv is None:
+            continue
+        full = ser.reindex(aidx)
+        full.loc[full.index < fv] = 1.0
+        full = full.ffill()
         label = _STRATEGY_LABELS.get(strat, strat[:28])
-        ax.plot(g["date"], eq, label=label, color=cmap(i % 10), linewidth=1.4)
+        ax.plot(full.index, full.values, label=label, color=cmap(i % 10), linewidth=1.4)
 
     ax.set_ylabel("Growth of $1 (net of cost haircut)")
     ax.set_xlabel("Date")
-    sub = "H4 (5d→5d) omitted — overlapping horizon, not daily-compoundable."
-    ax.set_title(
-        (title + "\n" + sub) if title else "Cross-sectional strategies\n" + sub
+    sub = (
+        "H4: non-overlapping 5d rebalances (flat between); others daily rebalance."
     )
+    ax.set_title((title + "\n" + sub) if title else "Cross-sectional strategies\n" + sub)
     ax.grid(True, alpha=0.25)
     ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
-    # Log scale when curves stay positive (usual case)
     try:
         ax.set_yscale("log")
     except Exception:

@@ -34,6 +34,7 @@ from backtest import (  # noqa: E402
     apply_costs,
     audit_extreme_days,
     daily_decile_returns,
+    non_overlapping_period_decile_returns,
     spearman_by_date,
     summarize_returns,
     train_test_split_by_date,
@@ -163,32 +164,59 @@ def run_strategy(
     else:
         wsig = None
 
-    daily = daily_decile_returns(
-        work,
-        "date",
-        signal_col,
-        ret_col,
-        bottom_decile=bottom_decile,
-        winsorized_signal_col=wsig,
-        frac=args.decile_frac,
-        min_bucket=args.min_bucket,
-    )
+    h4 = name.startswith("H4_")
+    if h4:
+        p = int(args.h4_period)
+        daily = non_overlapping_period_decile_returns(
+            work,
+            "date",
+            signal_col,
+            ret_col,
+            period=p,
+            bottom_decile=bottom_decile,
+            winsorized_signal_col=wsig,
+            frac=args.decile_frac,
+            min_bucket=args.min_bucket,
+        )
+    else:
+        daily = daily_decile_returns(
+            work,
+            "date",
+            signal_col,
+            ret_col,
+            bottom_decile=bottom_decile,
+            winsorized_signal_col=wsig,
+            frac=args.decile_frac,
+            min_bucket=args.min_bucket,
+        )
     if daily.empty:
         return {"strategy": name, "error": "no daily returns"}
 
     daily_net = apply_costs(daily, args.roundtrip_bps)
-    gross = summarize_returns(daily["portfolio_return"])
-    net = summarize_returns(daily_net["portfolio_return_net"])
+    obs_per_year = 252.0 / float(args.h4_period) if h4 else 252.0
+    gross = summarize_returns(
+        daily["portfolio_return"], observations_per_year=obs_per_year
+    )
+    net = summarize_returns(
+        daily_net["portfolio_return_net"], observations_per_year=obs_per_year
+    )
     tr, te = train_test_split_by_date(daily_net, args.train_frac)
-    train_s = summarize_returns(tr["portfolio_return_net"])
-    test_s = summarize_returns(te["portfolio_return_net"])
+    train_s = summarize_returns(
+        tr["portfolio_return_net"], observations_per_year=obs_per_year
+    )
+    test_s = summarize_returns(
+        te["portfolio_return_net"], observations_per_year=obs_per_year
+    )
 
     sub = work.dropna(subset=[sig_for_spearman, ret_col])
-    rho = spearman_by_date(sub, "date", sig_for_spearman, ret_col)
+    rebalance_dates = set(daily["date"].tolist()) if h4 else None
+    rho = spearman_by_date(
+        sub, "date", sig_for_spearman, ret_col, dates_filter=rebalance_dates
+    )
 
     extremes = audit_extreme_days(daily, top_k=5)
 
-    return {
+    out = {
         "strategy": name,
         "signal": signal_col,
         "forward_return": ret_col,
@@ -201,6 +229,10 @@ def run_strategy(
         "extreme_days_gross": extremes.to_dict(orient="records"),
         "daily": daily_net,
     }
+    if h4:
+        out["holding_trading_days"] = int(args.h4_period)
+        out["rebalance"] = "every_%d_trading_days_non_overlap" % int(args.h4_period)
+    return out
 
 
 def execute_backtest(args: argparse.Namespace) -> tuple[list[dict], pd.DataFrame]:
@@ -275,6 +307,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=5,
         help="Minimum names per leg (avoids n=1 buckets on small universes)",
     )
+    p.add_argument(
+        "--h4-period",
+        type=int,
+        default=5,
+        help="H4 only: rebalance every N trading days (non-overlapping holds)",
+    )
     p.add_argument("--out-json", help="Write summary JSON (no daily series)")
     p.add_argument("--out-daily", help="Write combined daily CSV for all strategies")
     p.add_argument("--plot", help="Write equity curve PNG to this path")
@@ -302,8 +340,8 @@ def main() -> None:
         file=sys.stderr,
     )
     print(
-        "- Costs: constant -%.1f bps per day on portfolio return (naive round-trip)."
-        % args.roundtrip_bps,
+        "- Costs: -%.1f bps per portfolio row (daily strategies: each trading day; H4: each %dd rebalance)."
+        % (args.roundtrip_bps, args.h4_period),
         file=sys.stderr,
     )
 
@@ -313,23 +351,32 @@ def main() -> None:
         if "error" in s:
             print("  %s" % s["error"])
             continue
-        if s["strategy"].startswith("H4_"):
+        if s.get("holding_trading_days"):
+            htd = int(s["holding_trading_days"])
             print(
-                "  NOTE: H4 assigns 5-day-forward return each day; compounded CAGR/total is not a tradable path.",
+                "  H4: non-overlapping %dd holds; n = completed periods; Sharpe/CAGR annualized on ~%.1f periods/year."
+                % (htd, 252.0 / htd),
                 file=sys.stderr,
             )
         print("  Spearman(signal, fwd) mean: %.4f" % s["spearman_signal_fwd_mean"])
+        mean_label = (
+            "mean_per_%dd_pct" % int(s["holding_trading_days"])
+            if s.get("holding_trading_days")
+            else "mean_daily_pct"
+        )
         for label, block in [
             ("net_full", s["net_full"]),
             ("net_train", s["net_train"]),
             ("net_test", s["net_test"]),
         ]:
+            mean_val = block.get("mean_daily", float("nan")) * 100
             print(
-                "  %s: n=%d mean_daily=%.4f Sharpe~=%.2f CAGR=%.2f%% tot=%.1f%% t=%.2f"
+                "  %s: n=%d %s=%.4f Sharpe~=%.2f CAGR=%.2f%% tot=%.1f%% t=%.2f"
                 % (
                     label,
                     block.get("n_days", 0),
-                    block.get("mean_daily", float("nan")) * 100,
+                    mean_label,
+                    mean_val,
                     block.get("sharpe_like", float("nan")),
                     block.get("cagr", float("nan")) * 100,
                     block.get("total_return", float("nan")) * 100,
