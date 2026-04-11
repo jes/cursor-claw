@@ -15,7 +15,7 @@ Chat context is lost each session. This file is the only persistent memory for t
 ## Workspace
 
 - **cursor-claw**: Workspace with Telegram–Cursor agent integration. The bot in `telegram-bot/` forwards messages from Telegram to the Cursor agent and replies with the agent's output.
-- **Cross-sectional reversal research** lives in **`~/reversal-research`** (standalone git repo): Yahoo OHLC backtests, H1–H4, H2b, **M1** (~21d loser momentum), EW + buy-hold baselines; working notes **`docs/CURRENT_KNOWLEDGE.md`**, roadmap **`docs/NEXT_STEPS.md`**, literature→experiment specs **`docs/EXPERIMENT_AGENT_PROMPT.md`** → **`experiments/*.md`**. Headless design pass: **`python3 scripts/run_experiment_discovery_agent.py`** (Cursor CLI). Plots: `run_study.py --plot …` then `telegram-bot/send_photo_now.py` (needs network).
+- **Cross-sectional reversal research** lives in **`~/reversal-research`** (standalone git repo): Yahoo OHLC backtests, H1–H4, H2b, **M1** (~21d loser momentum), EW + buy-hold baselines; working notes **`docs/CURRENT_KNOWLEDGE.md`**, roadmap **`docs/NEXT_STEPS.md`**. Specs: **`docs/EXPERIMENT_AGENT_PROMPT.md`** → **`experiments/*.md`** (`python3 scripts/run_experiment_discovery_agent.py`). Implement one spec: **`docs/EXPERIMENT_IMPLEMENTER_PROMPT.md`** + **`python3 scripts/run_experiment_implementer_agent.py experiments/NNN-….md`**. Plots: `run_study.py --plot …` then `telegram-bot/send_photo_now.py` (needs network).
 
 ## Telegram bot
 
