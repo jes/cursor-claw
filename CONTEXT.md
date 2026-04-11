@@ -15,7 +15,7 @@ Chat context is lost each session. This file is the only persistent memory for t
 ## Workspace
 
 - **cursor-claw**: Workspace with Telegram–Cursor agent integration. The bot in `telegram-bot/` forwards messages from Telegram to the Cursor agent and replies with the agent's output.
-- **Cross-sectional reversal research**: `research/cross_sectional_reversal/run_study.py` — Yahoo chart OHLC (split/div-adjusted open via adj. close), ticker blacklists for insane legs, optional winsorization, decile portfolios, costs, train/test split. Uses stdlib HTTP + pandas (no `yfinance`). Cache under `research/cross_sectional_reversal/.cache/` (gitignored). Short samples need `--min-days` below 252 (e.g. 40 for a 3-month window). **H4** (5d losers → next 5d): rebalances every **`--h4-period`** trading days (default 5) so holds do not overlap; costs and Sharpe/CAGR use **~252/h4_period** observations per year. **`--plot path.png`** equity chart forward-fills H4 between rebalances. **`telegram-bot/send_photo_now.py`** sends an image immediately via the bot token + `chat_id`.
+- **Cross-sectional reversal research** now lives in **`~/reversal-research`** (standalone git repo): Yahoo-based OHLC backtests, hypothesis menu (H1–H4 + H2b intraday winners → overnight), `run_study.py`, plots, docs (`README.md`, `docs/NEXT_STEPS.md`). To send a plot from this machine: run study with `--plot`, then `cursor-claw/telegram-bot/send_photo_now.py <png> "caption"`.
 
 ## Telegram bot
 
